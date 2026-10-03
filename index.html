@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Paige · Bookly Support</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --coffee: #3b2a18;
+    --saddle: #7a4f21;
+    --saddle-dark: #5f3c17;
+    --cream: #fbf6ea;
+    --parchment: #f5ecd9;
+    --sand-border: #dcc9a3;
+    --muted: #8a6f4d;
+  }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px;
+    font-family: system-ui, sans-serif;
+    color: var(--coffee);
+    background:
+      linear-gradient(rgba(250, 245, 232, 0.72), rgba(250, 245, 232, 0.72)),
+      url('bookstore-bg.png');
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed;
+  }
+  .wrap { width: 100%; max-width: 700px; }
+  h1 {
+    font-family: 'Playfair Display', Georgia, 'Times New Roman', serif;
+    font-weight: 700;
+    color: var(--coffee);
+    margin: 0 0 4px;
+    letter-spacing: 0.5px;
+  }
+  #session { color: var(--muted); margin: 0 0 14px; font-style: italic; }
+  #chat {
+    background: rgba(255, 253, 247, 0.94);
+    border: 1px solid var(--sand-border);
+    border-radius: 16px;
+    box-shadow: 0 6px 24px rgba(59, 42, 24, 0.12);
+    padding: 16px;
+    height: 65vh;
+    overflow-y: auto;
+    margin-bottom: 12px;
+  }
+  .msg { margin: 10px 0; }
+  .user { text-align: right; }
+  .user span {
+    background: var(--saddle);
+    color: #fff8ec;
+    padding: 9px 14px;
+    border-radius: 16px 16px 4px 16px;
+    display: inline-block;
+    max-width: 80%;
+    text-align: left;
+  }
+  .agent span {
+    background: var(--parchment);
+    color: var(--coffee);
+    border: 1px solid var(--sand-border);
+    padding: 9px 14px;
+    border-radius: 16px 16px 16px 4px;
+    display: inline-block;
+    max-width: 80%;
+  }
+  .tools { font-size: 0.75em; color: var(--muted); margin-top: 4px; }
+  #controls { display: flex; gap: 8px; }
+  #input {
+    flex: 1;
+    padding: 12px 14px;
+    font-size: 1em;
+    border: 1px solid var(--sand-border);
+    border-radius: 12px;
+    background: rgba(255, 253, 247, 0.96);
+    color: var(--coffee);
+  }
+  #input:focus { outline: 2px solid var(--saddle); border-color: var(--saddle); }
+  button {
+    padding: 12px 20px;
+    font-size: 1em;
+    font-family: 'Playfair Display', Georgia, serif;
+    cursor: pointer;
+    border-radius: 12px;
+    border: 1px solid var(--saddle);
+    transition: background 0.15s ease;
+  }
+  button:first-of-type {
+    background: var(--saddle);
+    color: #fff8ec;
+    font-weight: 600;
+  }
+  button:first-of-type:hover { background: var(--saddle-dark); }
+  button:last-of-type {
+    background: rgba(255, 253, 247, 0.9);
+    color: var(--saddle);
+  }
+  button:last-of-type:hover { background: var(--parchment); }
+  #egg {
+    position: fixed; bottom: 10px; right: 14px;
+    font-size: 11px; color: var(--muted); opacity: 0.45;
+    text-decoration: none; font-family: system-ui, sans-serif;
+  }
+  #egg:hover { opacity: 1; color: var(--saddle); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Paige · Bookly Support</h1>
+  <p id="session">Not logged in</p>
+  <div id="chat"></div>
+  <div id="controls">
+    <input id="input" placeholder="Type a message..." autocomplete="off">
+    <button onclick="send()">Send</button>
+    <button onclick="reset()">New conversation</button>
+  </div>
+</div>
+<a id="egg" href="/zork" title="a text adventure easter egg">zork</a>
+<script>
+  const chat = document.getElementById('chat');
+  const input = document.getElementById('input');
+  const sessionEl = document.getElementById('session');
+  function addMsg(cls, text, tools) {
+    const div = document.createElement('div');
+    div.className = 'msg ' + cls;
+    const bubble = document.createElement('span');
+    bubble.textContent = text;
+    div.appendChild(bubble);
+    if (tools && tools.length) {
+      const t = document.createElement('div');
+      t.className = 'tools';
+      t.textContent = 'tools used: ' + tools.join(', ');
+      div.appendChild(t);
+    }
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+    return div;
+  }
+  async function send() {
+    const text = input.value.trim();
+    if (!text) return;
+    addMsg('user', text);
+    input.value = '';
+    const waiting = addMsg('agent', '...');
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({message: text})
+    });
+    const data = await res.json();
+    waiting.remove();
+    addMsg('agent', data.reply, data.tools);
+    if (data.user) {
+      sessionEl.innerHTML = 'Logged in as <b>' + data.user + '</b>';
+    }
+  }
+  async function reset() {
+    await fetch('/api/reset', {method: 'POST'});
+    chat.innerHTML = '';
+    sessionEl.textContent = 'Not logged in';
+    addMsg('agent', "Hi, I'm Paige — welcome to Bookly Support! How can I help you today?");
+  }
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+  addMsg('agent', "Hi, I'm Paige — welcome to Bookly Support! How can I help you today?");
+</script>
+</body>
+</html>

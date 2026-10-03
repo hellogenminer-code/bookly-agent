@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bookly · Agent Dashboard</title>
+<style>
+  body { margin: 0; background: #f6f4ef; color: #222;
+         font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { padding: 14px 20px; background: #2b2118; color: #f6f4ef;
+           display: flex; gap: 16px; align-items: baseline; }
+  header h1 { font-size: 18px; margin: 0; font-weight: 600; }
+  header .meta { font-size: 13px; opacity: .85; }
+  .live { display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+          background: #3fa34d; margin-right: 8px; animation: pulse 2s infinite; }
+  @keyframes pulse { 50% { opacity: .35; } }
+  main { display: grid; grid-template-columns: 1fr 340px; gap: 16px; padding: 16px 20px; }
+  .panel { background: #fff; border: 1px solid #e3ddd2; border-radius: 10px; padding: 14px; }
+  .panel h2 { font-size: 13px; margin: 0 0 10px; text-transform: uppercase;
+              letter-spacing: .06em; color: #6b5f4c; }
+  #turns { display: flex; flex-direction: column; gap: 10px;
+           max-height: 72vh; overflow-y: auto; }
+  .turn { border: 1px solid #eee7d8; border-radius: 8px; padding: 10px 12px; font-size: 14px; }
+  .turn .who { font-size: 12px; color: #6b5f4c; margin-bottom: 6px;
+               display: flex; justify-content: space-between; align-items: center; }
+  .turn .msg { margin: 4px 0; line-height: 1.45; }
+  .turn .why { font-size: 12px; color: #8a7f6a; margin-top: 6px; }
+  .csat { font-weight: 700; font-size: 12px; padding: 2px 10px; border-radius: 20px; white-space: nowrap; }
+  .csat.hi { background: #dff0df; color: #2c6d2c; }
+  .csat.mid { background: #fdf0d5; color: #8a6d1a; }
+  .csat.lo { background: #fbe3e3; color: #a33333; }
+  .ticket { border-left: 4px solid #b3541e; background: #fffaf4;
+            padding: 10px 12px; border-radius: 0 8px 8px 0; margin-bottom: 10px; font-size: 14px; }
+  .ticket .ref { font-weight: 700; }
+  .ticket .sub { margin-top: 4px; line-height: 1.45; }
+  .ticket .det { font-size: 12px; color: #8a7f6a; margin-top: 6px; }
+  .empty { color: #8a7f6a; font-size: 13px; }
+  .prelogin { font-size: 11px; color: #8a7f6a; border: 1px solid #e3ddd2;
+              padding: 1px 8px; border-radius: 12px; margin-left: 6px; white-space: nowrap; }
+  .topic { font-size: 11px; color: #6b5f4c; background: #f1ece2;
+           padding: 2px 8px; border-radius: 12px; margin-left: 6px; white-space: nowrap; }
+  .side { display: flex; flex-direction: column; gap: 16px; }
+  .volrow { display: flex; justify-content: space-between; align-items: center;
+            font-size: 13px; padding: 7px 0; border-bottom: 1px solid #f0ebe0; }
+  .volrow:last-child { border-bottom: none; }
+  .disp { font-size: 11px; font-weight: 700; padding: 2px 10px; border-radius: 12px;
+          background: #e8e2d4; color: #6b5f4c; margin-left: 8px; white-space: nowrap; }
+  .disp.esc { background: #fbe3e3; color: #a33333; }
+  .note { font-size: 13.5px; line-height: 1.6; white-space: pre-wrap; }
+  #credit {
+    position: fixed; bottom: 10px; right: 14px;
+    font-size: 11px; color: #8a7f6a; opacity: 0.7;
+  }
+  #credit a { color: inherit; text-decoration: none; }
+  #credit:hover { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="live"></span>Paige · Agent Dashboard</h1>
+  <span class="meta" id="meta">connecting…</span>
+</header>
+<main>
+  <section class="panel">
+    <h2>Conversation memory — turn by turn</h2>
+    <div id="turns"><p class="empty">Waiting for the chat…</p></div>
+  </section>
+  <div class="side">
+    <section class="panel">
+      <h2>Escalation tickets</h2>
+      <div id="tickets"><p class="empty">No tickets yet.</p></div>
+    </section>
+    <section class="panel">
+      <h2>Topic volume</h2>
+      <div id="volume"><p class="empty">No turns yet.</p></div>
+    </section>
+    <section class="panel">
+      <h2>Conversation Summary</h2>
+      <div id="handoff"><p class="empty">The summary appears here as the conversation unfolds.</p></div>
+    </section>
+  </div>
+</main>
+<script>
+  const turnsEl = document.getElementById('turns');
+  const ticketsEl = document.getElementById('tickets');
+  const volumeEl = document.getElementById('volume');
+  const handoffEl = document.getElementById('handoff');
+  const metaEl = document.getElementById('meta');
+  let lastTurnsKey = '', lastTicketsKey = '', lastNoteKey = '\0';
+
+  function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g, c =>
+      ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+  }
+  function csatClass(s) { return s >= 4 ? 'hi' : s === 3 ? 'mid' : 'lo'; }
+
+  async function poll() {
+    try {
+      const r = await fetch('/api/state');
+      const d = await r.json();
+      if (!d.logged_in && !d.anonymous) {
+        metaEl.textContent = 'not logged in — log in via the chat';
+        return;
+      }
+      const turns = d.turns || [];
+      const scores = turns.map(t => t.csat).filter(s => typeof s === 'number');
+      const avg = scores.length
+        ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1) : '–';
+      const who = d.anonymous ? 'Guest session' : d.customer;
+      const disp = d.disposition && d.disposition !== 'open' ? d.disposition : '';
+      metaEl.innerHTML = `${esc(who)} · ${turns.length} turns · avg CSAT ${esc(avg)}/5` +
+        (disp ? `<span class="disp esc">${esc(disp)}</span>` : '');
+
+      // Only re-render a panel when its data actually changed --
+      // the page itself never reloads.
+      const turnsKey = JSON.stringify(turns);
+      if (turnsKey !== lastTurnsKey) {
+        lastTurnsKey = turnsKey;
+        turnsEl.innerHTML = turns.length ? turns.map(t => `
+        <div class="turn">
+          <div class="who">
+            <span>customer · ${esc(t.date || '')}${t.pre_login ? '<span class="prelogin">before login</span>' : ''}<span class="topic">${esc(t.topic_l1 || 'Unclassified')} › ${esc(t.topic_l2 || 'general')}</span></span>
+            ${typeof t.csat === 'number'
+              ? `<span class="csat ${csatClass(t.csat)}">CSAT ${t.csat}/5</span>` : ''}
+          </div>
+          <div class="msg"><strong>Customer:</strong> ${esc(t.user)}</div>
+          <div class="msg"><strong>Paige:</strong> ${esc(t.assistant)}</div>
+          ${t.csat_reason ? `<div class="why">${esc(t.csat_reason)}</div>` : ''}
+        </div>`).join('')
+        : '<p class="empty">No turns recorded yet.</p>';
+        turnsEl.scrollTop = turnsEl.scrollHeight;
+
+        // Volume reporting: turns and avg CSAT per topic, straight from the data.
+        const vol = {};
+        turns.forEach(t => {
+          const key = `${t.topic_l1 || 'Unclassified'} › ${t.topic_l2 || 'general'}`;
+          vol[key] = vol[key] || { n: 0, ssum: 0, sn: 0 };
+          vol[key].n++;
+          if (typeof t.csat === 'number') { vol[key].ssum += t.csat; vol[key].sn++; }
+        });
+        const rows = Object.entries(vol).sort((a, b) => b[1].n - a[1].n);
+        volumeEl.innerHTML = rows.length ? rows.map(([k, v]) => {
+          const a = v.sn ? (v.ssum / v.sn).toFixed(1) : '–';
+          const cls = a === '–' ? 'mid' : csatClass(parseFloat(a));
+          return `<div class="volrow"><span>${esc(k)}</span>` +
+            `<span><b>${v.n}</b> · <span class="csat ${cls}">${a}</span></span></div>`;
+        }).join('') : '<p class="empty">No turns yet.</p>';
+      }
+
+      const tickets = d.tickets || [];
+      const ticketsKey = JSON.stringify(tickets);
+      if (ticketsKey !== lastTicketsKey) {
+        lastTicketsKey = ticketsKey;
+        ticketsEl.innerHTML = tickets.length ? tickets.map(k => {
+          const full = k.summary || '';
+          const short = full.length > 160 ? full.slice(0, 160) + '…' : full;
+          return `
+        <div class="ticket">
+          <div class="ref">${esc(k.ticket_ref)} · ${esc(k.status)}</div>
+          <div class="sub">${esc(short)}</div>
+          <div class="det">trigger: ${esc(k.trigger)} · priority: ${esc(k.priority)}${k.amount ? ` · $${k.amount}` : ''}${k.order_id ? ` · ${esc(k.order_id)}` : ''}${k.context && k.context.csat != null ? ` · CSAT: ${esc(String(k.context.csat))}/5` : ''}</div>
+        </div>`;
+        }).join('')
+        : '<p class="empty">No tickets yet.</p>';
+      }
+
+      const noteKey = d.conversation_summary || '';
+      if (noteKey !== lastNoteKey) {
+        lastNoteKey = noteKey;
+        handoffEl.innerHTML = noteKey
+          ? `<div class="note">${esc(noteKey)}</div>`
+          : '<p class="empty">The summary appears here as the conversation unfolds.</p>';
+      }
+    } catch (e) {
+      metaEl.textContent = 'connection error — is web.py running?';
+    }
+  }
+  setInterval(poll, 2500);
+  poll();
+</script>
+<div id="credit">built by <a href="https://www.linkedin.com/in/gen-miner" target="_blank" rel="noopener">Gen Miner</a></div>
+</body>
+</html>

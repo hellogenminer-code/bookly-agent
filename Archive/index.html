@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Paige · Bookly Support</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 700px; margin: 40px auto; padding: 0 16px; }
+  #session { color: #666; margin-top: -10px; }
+  #chat { border: 1px solid #ddd; border-radius: 8px; padding: 16px; height: 400px; overflow-y: auto; margin-bottom: 12px; }
+  .msg { margin: 8px 0; }
+  .user { text-align: right; }
+  .user span { background: #e8f0fe; padding: 8px 12px; border-radius: 12px; display: inline-block; }
+  .agent span { background: #f1f1f1; padding: 8px 12px; border-radius: 12px; display: inline-block; }
+  .tools { font-size: 0.75em; color: #888; margin-top: 4px; }
+  #controls { display: flex; gap: 8px; }
+  #input { flex: 1; padding: 10px; font-size: 1em; }
+  button { padding: 10px 16px; font-size: 1em; cursor: pointer; }
+</style>
+</head>
+<body>
+<h1>Paige · Bookly Support</h1>
+<p id="session">Not logged in</p>
+<div id="chat"></div>
+<div id="controls">
+  <input id="input" placeholder="Type a message..." autocomplete="off">
+  <button onclick="send()">Send</button>
+  <button onclick="reset()">New conversation</button>
+</div>
+<script>
+  const chat = document.getElementById('chat');
+  const input = document.getElementById('input');
+  const sessionEl = document.getElementById('session');
+  function addMsg(cls, text, tools) {
+    const div = document.createElement('div');
+    div.className = 'msg ' + cls;
+    const bubble = document.createElement('span');
+    bubble.textContent = text;
+    div.appendChild(bubble);
+    if (tools && tools.length) {
+      const t = document.createElement('div');
+      t.className = 'tools';
+      t.textContent = 'tools used: ' + tools.join(', ');
+      div.appendChild(t);
+    }
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+    return div;
+  }
+  async function send() {
+    const text = input.value.trim();
+    if (!text) return;
+    addMsg('user', text);
+    input.value = '';
+    const waiting = addMsg('agent', '...');
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({message: text})
+    });
+    const data = await res.json();
+    waiting.remove();
+    addMsg('agent', data.reply, data.tools);
+    if (data.user) {
+      sessionEl.innerHTML = 'Logged in as <b>' + data.user + '</b>';
+    }
+  }
+  async function reset() {
+    await fetch('/api/reset', {method: 'POST'});
+    chat.innerHTML = '';
+    sessionEl.textContent = 'Not logged in';
+    addMsg('agent', "Hi, I'm Paige — welcome to Bookly Support! How can I help you today?");
+  }
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+  addMsg('agent', "Hi, I'm Paige — welcome to Bookly Support! How can I help you today?");
+</script>
+</body>
+</html>

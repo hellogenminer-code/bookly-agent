@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zork: Bookly Edition — readme</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --amber: #ffb000;
+    --ink: #2b2118;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 20px;
+    font-family: "VT323", "Courier New", monospace;
+    color: var(--ink);
+    background: url('zork-valley.png');
+    background-size: cover;
+    background-position: center;
+    background-attachment: fixed;
+    image-rendering: pixelated;
+  }
+  .sheet {
+    background: rgba(255, 253, 247, 0.88);
+    max-width: 720px;
+    width: 100%;
+    max-height: 86vh;
+    overflow-y: auto;
+    border-radius: 10px;
+    padding: 36px 44px;
+    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.45);
+  }
+  h1 { font-size: 44px; margin: 0; letter-spacing: 0.04em; }
+  .sub { font-size: 22px; color: #6b5f4c; margin: 2px 0 18px; }
+  h2 { font-size: 30px; margin: 26px 0 8px; color: #7a4a12; }
+  p, li { font-size: 21px; line-height: 1.5; margin: 8px 0; }
+  code { background: rgba(0, 0, 0, 0.07); padding: 1px 7px; border-radius: 4px; font-size: 19px; }
+  .back { display: none; }
+  #backbtn { position: fixed; bottom: 18px; right: 18px; }
+  #backbtn img { width: 120px; height: auto; display: block; border-radius: 8px; transition: filter 0.15s ease; }
+  #backbtn:hover img { filter: brightness(1.3); }
+</style>
+</head>
+<body>
+  <div class="sheet">
+    <h1>ZORK: Bookly Edition</h1>
+    <p class="sub">an easter egg</p>
+
+    <h2>How to play</h2>
+    <p>Via the chat at <code>/zork</code>, or in the terminal with <code>python zork.py</code>.</p>
+    <p>Commands: look, go north/south/east/west/up/down, take lantern/key/letter, open mailbox, open letter, read letter, talk to boos, drink rye, ask vulture [question], answer [word], use key, inventory, quit.</p>
+    <p><em>Fair warning: do not enter the basement without the lantern. You are likely to be eaten by a grue.</em></p>
+
+    <h2>How it works</h2>
+    <p>The same hybrid pattern as the support agent: a deterministic parser owns everything the game must get right (movement, inventory, the riddle, win/lose states), and an LLM narrator improvises in-world responses for anything the parser doesn't recognize, with a vulture whose herding gets more insistent the further off track you stray. One <code>ZorkGame</code> instance per session keeps every player's adventure isolated.</p>
+
+    <h2>Why it exists</h2>
+    <p>Building this agent kept taking me back to my Return to Zork days, when half the fun was typing a command into the parser just to see what it would understand. That loop of trying something, watching the system respond, and adjusting is exactly what this whole build felt like. What blew my mind is what sits behind the parser now. Back then it was hand-written rules and imagination. Here it is a deterministic engine for everything that must be exactly right, with a language model covering the long tail of everything else. Putting those two eras next to each other reminded me why I love doing this.</p>
+    <p>I made this Zork game to show how I plan to customize each customer demo, with the bottomless passion I have for solving problems and sparking joy with this technology.</p>
+
+    <a id="backbtn" href="/zork" title="back to the game"><img src="zork-return.png" alt="back to the game"></a>
+  </div>
+</body>
+</html>

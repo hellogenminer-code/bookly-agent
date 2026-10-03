@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bookly · Demo Split Screen</title>
+<style>
+  html, body { margin: 0; height: 100%; }
+  body { display: grid; grid-template-columns: 1fr 1fr; }
+  iframe { border: 0; width: 100%; height: 100vh; display: block; }
+  iframe:first-child { border-right: 1px solid #ddd; }
+</style>
+</head>
+<body>
+  <iframe src="/dashboard" title="Agent dashboard"></iframe>
+  <iframe src="/" title="Bookly chat"></iframe>
+</body>
+</html>

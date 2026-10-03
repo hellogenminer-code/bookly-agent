@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Bookly chat widget (preview)</title></head>
+<body>
+<!-- ====== COPY EVERYTHING BELOW THIS LINE into your bookstore page, just before </body> ====== -->
+<div id="bookly-chat">
+  <button id="bchat-bubble" aria-label="Open chat">💬</button>
+  <div id="bchat-panel" hidden>
+    <div id="bchat-header">
+      <div>
+        <div id="bchat-title">Paige · Bookly Support</div>
+        <div id="bchat-session">Not logged in</div>
+      </div>
+      <button id="bchat-new">New chat</button>
+    </div>
+    <div id="bchat-messages"></div>
+    <div id="bchat-inputrow">
+      <input id="bchat-input" placeholder="Type a message..." autocomplete="off">
+      <button id="bchat-send">Send</button>
+    </div>
+  </div>
+</div>
+<style>
+  #bookly-chat {
+    --bchat-accent: #4a3220;
+    --bchat-bubble-bg: #4a3220;
+    --bchat-panel-bg: #ffffff;
+    --bchat-text: #222222;
+    --bchat-user-bubble: #e8f0fe;
+    --bchat-agent-bubble: #f1f1f1;
+    --bchat-font: system-ui, sans-serif;
+    position: fixed; right: 24px; bottom: 24px; z-index: 9999;
+    display: flex; flex-direction: column; align-items: flex-end;
+    font-family: var(--bchat-font); color: var(--bchat-text);
+  }
+  #bchat-bubble {
+    order: 2;
+    width: 60px; height: 60px; border-radius: 50%; border: none; cursor: pointer;
+    background: var(--bchat-bubble-bg); font-size: 26px;
+    box-shadow: 0 4px 14px rgba(0,0,0,.25);
+  }
+  #bchat-panel {
+    order: 1;
+    width: 380px; max-width: calc(100vw - 48px);
+    height: 540px; max-height: calc(100vh - 120px);
+    background: var(--bchat-panel-bg); border-radius: 12px; overflow: hidden;
+    display: flex; flex-direction: column;
+    box-shadow: 0 8px 30px rgba(0,0,0,.25); margin-bottom: 12px;
+  }
+  #bchat-panel[hidden] { display: none; }
+  #bchat-header {
+    background: var(--bchat-accent); color: #fff; padding: 12px 14px;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  #bchat-title { font-weight: 700; }
+  #bchat-session { font-size: .78em; opacity: .85; }
+  #bchat-new { background: rgba(255,255,255,.18); color: #fff; border: none; border-radius: 6px; padding: 6px 10px; cursor: pointer; }
+  #bchat-messages { flex: 1; overflow-y: auto; padding: 12px; }
+  .bchat-msg { margin: 8px 0; }
+  .bchat-msg.user { text-align: right; }
+  .bchat-msg span { display: inline-block; padding: 8px 12px; border-radius: 12px; max-width: 85%; }
+  .bchat-msg.user span { background: var(--bchat-user-bubble); }
+  .bchat-msg.agent span { background: var(--bchat-agent-bubble); }
+  .bchat-tools { font-size: .72em; color: #888; margin-top: 4px; }
+  #bchat-inputrow { display: flex; gap: 8px; padding: 10px; border-top: 1px solid #eee; }
+  #bchat-input { flex: 1; padding: 10px; font-size: 1em; border: 1px solid #ddd; border-radius: 8px; }
+  #bchat-send { background: var(--bchat-accent); color: #fff; border: none; border-radius: 8px; padding: 10px 14px; cursor: pointer; }
+</style>
+<script>
+(function () {
+  const panel = document.getElementById('bchat-panel');
+  const bubble = document.getElementById('bchat-bubble');
+  const msgs = document.getElementById('bchat-messages');
+  const input = document.getElementById('bchat-input');
+  const sessionEl = document.getElementById('bchat-session');
+  let greeted = false;
+
+  bubble.onclick = () => {
+    panel.hidden = !panel.hidden;
+    if (!panel.hidden && !greeted) {
+      greeted = true;
+      addMsg('agent', "Hi, I'm Paige — welcome to Bookly Support! How can I help you today?");
+    }
+  };
+  function addMsg(cls, text, tools) {
+    const div = document.createElement('div');
+    div.className = 'bchat-msg ' + cls;
+    const s = document.createElement('span');
+    s.textContent = text;
+    div.appendChild(s);
+    if (tools && tools.length) {
+      const t = document.createElement('div');
+      t.className = 'bchat-tools';
+      t.textContent = 'tools used: ' + tools.join(', ');
+      div.appendChild(t);
+    }
+    msgs.appendChild(div);
+    msgs.scrollTop = msgs.scrollHeight;
+    return div;
+  }
+  async function send() {
+    const text = input.value.trim();
+    if (!text) return;
+    addMsg('user', text);
+    input.value = '';
+    const waiting = addMsg('agent', '...');
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({message: text})
+      });
+      const data = await res.json();
+      waiting.remove();
+      addMsg('agent', data.reply, data.tools);
+      if (data.user) sessionEl.innerHTML = 'Logged in as <b>' + data.user + '</b>';
+    } catch (e) {
+      waiting.remove();
+      addMsg('agent', 'Something went wrong talking to the server. Is web.py running?');
+    }
+  }
+  async function reset() {
+    await fetch('/api/reset', {method: 'POST'});
+    msgs.innerHTML = '';
+    sessionEl.textContent = 'Not logged in';
+    greeted = true;
+    addMsg('agent', "Hi, I'm Paige — welcome to Bookly Support! How can I help you today?"
+);
+  }
+  document.getElementById('bchat-send').onclick = send;
+  document.getElementById('bchat-new').onclick = reset;
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+})();
+</script>
+<!-- ====== COPY EVERYTHING ABOVE THIS LINE ====== -->
+</body>
+</html>

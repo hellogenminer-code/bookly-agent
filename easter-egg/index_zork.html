@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Zork · a Bookly easter egg</title>
+<link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --amber: #ffb000;
+    --green: #33ff66;
+    --bone: #e8e0c8;
+    --dim: #8a7f5c;
+    --panel: rgba(8, 6, 4, 0.92);
+    --edge: #3a2f1a;
+  }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px 16px;
+    font-family: 'VT323', 'Courier New', monospace;
+    font-size: 20px;
+    color: var(--bone);
+    background: url('zork-house.png');
+    background-size: cover;
+    background-position: center;
+    image-rendering: pixelated;
+    cursor: url('zork-hand.png'), auto;
+  }
+  .wrap { width: 100%; max-width: 780px; }
+  h1 {
+    font-weight: 400;
+    font-size: 64px;
+    letter-spacing: 14px;
+    color: var(--amber);
+    margin: 0 0 2px;
+    text-shadow: 0 0 18px rgba(255, 176, 0, 0.45);
+  }
+  #session { color: #fff8ec; margin: 0 0 14px; text-shadow: 0 1px 8px rgba(0, 0, 0, 0.7); }
+  #chat {
+    background: var(--panel);
+    border: 2px solid var(--edge);
+    border-radius: 6px;
+    box-shadow: 0 0 32px rgba(0, 0, 0, 0.8), inset 0 0 60px rgba(255, 176, 0, 0.03);
+    padding: 18px;
+    height: 55vh;
+    overflow-y: auto;
+    margin-bottom: 12px;
+    line-height: 1.45;
+  }
+  .msg { margin: 10px 0; white-space: pre-wrap; }
+  .user { color: var(--amber); }
+  .user span::before { content: "> "; }
+  .agent { color: var(--bone); }
+  .agent .who { color: var(--dim); }
+  #controls { display: flex; gap: 8px; }
+  #input {
+    flex: 1;
+    padding: 10px 12px;
+    font-size: 20px;
+    font-family: inherit;
+    background: #000;
+    color: var(--green);
+    border: 2px solid var(--edge);
+    border-radius: 4px;
+    caret-color: var(--green);
+  }
+  #input:focus { outline: none; border-color: var(--green); }
+  button {
+    padding: 10px 18px;
+    font-size: 20px;
+    font-family: inherit;
+    cursor: pointer;
+    border-radius: 4px;
+    border: 2px solid var(--amber);
+    transition: background 0.15s ease;
+  }
+  button:first-of-type { background: var(--amber); color: #14100a; }
+  button:first-of-type:hover { background: #ffc133; }
+  button:last-of-type { background: transparent; color: var(--amber); }
+  button:last-of-type:hover { background: rgba(255, 176, 0, 0.12); }
+  #egg {
+    position: fixed; bottom: 10px; right: 14px;
+    text-decoration: none;
+  }
+  #egg img { width: 48px; height: 48px; display: block; transition: filter 0.15s ease; image-rendering: pixelated; }
+  #egg:hover img { filter: brightness(1.35); }
+  #helpbtn {
+    position: fixed; top: 14px; right: 14px;
+    text-decoration: none;
+  }
+  #helpbtn img { width: 48px; height: 48px; display: block; transition: filter 0.15s ease; image-rendering: pixelated; }
+  #helpbtn:hover img { filter: brightness(1.35); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ZORK</h1>
+  <p id="session">an interactive fiction easter egg - type 'open mailbox' to begin or 'about' for more info</p>
+  <div id="chat"></div>
+  <div id="controls">
+    <input id="input" placeholder="> " autocomplete="off">
+    <button onclick="send()">Go</button>
+    <button onclick="restart()">Restart</button>
+  </div>
+</div>
+<a id="helpbtn" href="/zork-readme" title="about this easter egg"><img src="zork-help.png" alt="about"></a>
+<a id="egg" href="/" title="back to the bookstore"><img src="book-icon.png" alt="back to the bookstore"></a>
+<script>
+  const chat = document.getElementById('chat');
+  const input = document.getElementById('input');
+  const sessionId = 'zork-' + Math.random().toString(36).slice(2);
+  function scrollBottom() {
+    // double rAF: wait until the browser has laid out the new (possibly
+    // font-reflowed) content before measuring scrollHeight
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      chat.scrollTop = chat.scrollHeight;
+    }));
+  }
+  function addMsg(cls, text, who) {
+    const div = document.createElement('div');
+    div.className = 'msg ' + cls;
+    if (who) {
+      const w = document.createElement('span');
+      w.className = 'who';
+      w.textContent = who + ': ';
+      div.appendChild(w);
+    }
+    const bubble = document.createElement('span');
+    bubble.textContent = text;
+    div.appendChild(bubble);
+    chat.appendChild(div);
+    scrollBottom();
+    return div;
+  }
+  async function send() {
+    const text = input.value.trim();
+    if (!text) return;
+    addMsg('user', text);
+    input.value = '';
+    const waiting = addMsg('agent', '...', 'Zork');
+    try {
+      const res = await fetch('/api/zork', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({message: text, session: sessionId})
+      });
+      const data = await res.json();
+      waiting.remove();
+      addMsg('agent', data.reply, 'Zork');
+    } catch (e) {
+      waiting.remove();
+      addMsg('agent', 'The Zork engine is not connected yet.', 'Zork');
+    }
+  }
+  async function restart() {
+    await fetch('/api/zork', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({message: '', session: sessionId, restart: true})
+    });
+    chat.innerHTML = '';
+    greet();
+  }
+  function greet() {
+    addMsg('agent', 'West of House\nYou are standing in an open field west of a white house, with a boarded front door. There is a small mailbox here.', 'Zork');
+  }
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') send(); });
+  greet();
+</script>
+</body>
+</html>
