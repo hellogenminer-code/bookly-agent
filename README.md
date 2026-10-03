@@ -46,7 +46,7 @@ Deterministic, in code, never at the model's discretion:
 - A **living conversation summary** rewrites every turn from the full turn log, with a deterministic state line (latest topic, current CSAT, auth status) — visible on the dashboard whether or not a ticket is ever filed
 - Pre-login turns are tracked as an anonymous **guest session**, then attached to the customer record at login (tagged `before login`)
 - Past visits load into the prompt on login — the agent remembers
-- **Three escalation triggers, one ticket:** the $150 rule, CSAT dropping to ≤ 2, or the customer asking for a human. Ticket **priority follows CSAT** (1–2 → high, 3+ → normal), the score is recorded on the ticket, and a later dip **bumps the open ticket** instead of filing a second one
+- **Three escalation triggers, one ticket:** the $150 rule, CSAT dropping to ≤ 2, or the customer asking for a human. Ticket **priority follows CSAT** (1–2 → high, 3+ → normal), the score is recorded on the ticket, and a later dip **bumps the open ticket** instead of filing a second one. Dedupe works both directions: if a low-CSAT ticket is already open when the $150 rule fires, the policy escalation is **folded into it** — the trigger accumulates (`low_csat,policy_threshold`), the order and amount are attached, and the handoff note is rebuilt to cover both reasons.
 
 ## Project structure
 

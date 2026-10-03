@@ -101,14 +101,24 @@ def _set_order_status(customer_id: str, order_id: str, new_status: str) -> bool:
 
 
 def _ticket_reason(trigger: str, amount: float, context: Optional[dict]) -> str:
-    """Factual, templated escalation reason -- no LLM judgment needed."""
-    if trigger == "policy_threshold":
-        return (f"Reason for escalation: refund of ${amount:.2f} meets or exceeds "
-                f"the ${AUTO_APPROVE_LIMIT:.0f} auto-approve limit.")
-    if trigger == "low_csat":
+    """Factual, templated escalation reason -- no LLM judgment needed.
+    Triggers accumulate comma-separated (e.g. "low_csat,policy_threshold")
+    when one ticket absorbs multiple escalation events."""
+    reasons = []
+    parts = [t.strip() for t in (trigger or "").split(",") if t.strip()]
+    if "policy_threshold" in parts:
+        reasons.append(
+            f"Reason for escalation: refund of ${amount:.2f} meets or exceeds "
+            f"the ${AUTO_APPROVE_LIMIT:.0f} auto-approve limit.")
+    if "low_csat" in parts:
         score = (context or {}).get("csat_score", "?")
-        return f"Reason for escalation: customer satisfaction dropped to {score}/5."
-    return "Reason for escalation: customer asked for a human specialist."
+        reasons.append(
+            f"Reason for escalation: customer satisfaction dropped to {score}/5.")
+    if "customer_request" in parts:
+        reasons.append(
+            "Reason for escalation: customer asked for a human specialist.")
+    return " ".join(reasons) or \
+        "Reason for escalation: customer asked for a human specialist."
 
 
 def _recommend_next_step(customer: dict, trigger: str, order_id: str,
@@ -199,9 +209,13 @@ def _open_ticket_today_by_email(customer_email: str) -> Optional[dict]:
 
 def _update_ticket(ticket_ref: str, priority: Optional[str] = None,
                    csat: Optional[int] = None,
-                   context_extra: Optional[dict] = None) -> dict:
-    """Update an open ticket: raise priority and/or record the latest CSAT.
-    Raises on failure."""
+                   context_extra: Optional[dict] = None,
+                   trigger: Optional[str] = None,
+                   order_id: Optional[str] = None,
+                   amount: Optional[float] = None,
+                   summary: Optional[str] = None) -> dict:
+    """Update an open ticket: priority, CSAT, trigger, order/amount, summary,
+    and/or merged context. Raises on failure."""
     resp = supabase.table("escalations").select("ticket_ref,context").eq("ticket_ref", ticket_ref).execute()
     if not resp.data:
         raise ValueError("Ticket not found.")
@@ -213,26 +227,24 @@ def _update_ticket(ticket_ref: str, priority: Optional[str] = None,
     patch = {"context": context}
     if priority:
         patch["priority"] = priority
+    if trigger:
+        patch["trigger"] = trigger
+    if order_id:
+        patch["order_id"] = order_id
+    if amount is not None:
+        patch["amount"] = amount
+    if summary:
+        patch["summary"] = summary
     supabase.table("escalations").update(patch).eq("ticket_ref", ticket_ref).execute()
     return {"updated": True, "ticket_ref": ticket_ref, **patch}
 
 
-def _create_ticket(customer_id: str, trigger: str, summary: str,
-                   order_id: str = "", amount: float = 0.0,
-                   context: Optional[dict] = None,
-                   csat: Optional[int] = None) -> dict:
-    """Shared helper: insert one row into the escalations work queue. The ticket note
-    is the living conversation narrative plus the escalation reason, a recommended
-    next step, and the current state -- the handoff view a human agent wants.
-    Priority follows the customer's satisfaction: CSAT 1-2 -> high, otherwise normal.
-    The CSAT is recorded on the ticket. Raises on failure."""
-    if trigger not in ESCALATION_TRIGGERS:
-        raise ValueError(f"Unknown escalation trigger: {trigger}")
-    resp = supabase.table("customers").select("id,name,email,details").eq("id", customer_id).execute()
-    if not resp.data:
-        raise ValueError("Customer not found.")
-    c = resp.data[0]
-    details = c.get("details") or {}
+def _build_ticket_note(c: dict, details: dict, trigger: str, order_id: str,
+                       amount: float, context: Optional[dict],
+                       one_liner: str, csat: Optional[int] = None):
+    """Build the handoff note and priority for a ticket.
+    Returns (note, priority, csat). Shared by ticket creation and updates so a
+    ticket that absorbs a later escalation reads as one coherent handoff."""
     if csat is None:
         csat = _latest_csat(details)  # last scored turn; None if unknown
     priority = "high" if isinstance(csat, int) and csat <= 2 else "normal"
@@ -252,6 +264,28 @@ def _create_ticket(customer_id: str, trigger: str, summary: str,
     parts.append(f"Recommended next step: {rec}")
     parts.append(_conversation_state_line(details))
     note = "\n".join(parts)
+    return note, priority, csat
+
+
+def _create_ticket(customer_id: str, trigger: str, summary: str,
+                   order_id: str = "", amount: float = 0.0,
+                   context: Optional[dict] = None,
+                   csat: Optional[int] = None) -> dict:
+    """Shared helper: insert one row into the escalations work queue. The ticket note
+    is the living conversation narrative plus the escalation reason, a recommended
+    next step, and the current state -- the handoff view a human agent wants.
+    Priority follows the customer's satisfaction: CSAT 1-2 -> high, otherwise normal.
+    The CSAT is recorded on the ticket. Raises on failure."""
+    parts = [t.strip() for t in (trigger or "").split(",") if t.strip()]
+    if not parts or any(t not in ESCALATION_TRIGGERS for t in parts):
+        raise ValueError(f"Unknown escalation trigger: {trigger}")
+    resp = supabase.table("customers").select("id,name,email,details").eq("id", customer_id).execute()
+    if not resp.data:
+        raise ValueError("Customer not found.")
+    c = resp.data[0]
+    details = c.get("details") or {}
+    note, priority, csat = _build_ticket_note(
+        c, details, trigger, order_id, amount, context, summary, csat)
     row = {
         "customer_email": c["email"],
         "customer_name": c["name"],
@@ -484,43 +518,90 @@ def initiate_return(order_id: str, reason: str) -> dict:
     action = "cancelled" if eligibility.get("cancellation") else "returned"
     if total >= AUTO_APPROVE_LIMIT:
         ticket_ref = None
+        deduped = False
+        one_liner = (
+            f"{action.capitalize()} of order {order_id} (${total:.2f}) needs human "
+            f"approval (auto-approve limit is ${AUTO_APPROVE_LIMIT:.0f}). "
+            f"Customer reason: {reason}"
+        )
+        ctx = {
+            "order_id": order_id,
+            "amount": total,
+            "action": action,
+            "customer_reason": reason,
+        }
         try:
-            ticket = _create_ticket(
-                customer_id,
-                "policy_threshold",
-                (
-                    f"{action.capitalize()} of order {order_id} (${total:.2f}) needs human "
-                    f"approval (auto-approve limit is ${AUTO_APPROVE_LIMIT:.0f}). "
-                    f"Customer reason: {reason}"
-                ),
-                order_id=order_id,
-                amount=total,
-                context={
-                    "order_id": order_id,
-                    "amount": total,
-                    "action": action,
-                    "customer_reason": reason,
-                },
-            )
-            ticket_ref = ticket["ticket_ref"]
+            existing = _open_ticket_today_by_email(eligibility["customer_email"])
+            if existing:
+                # One ticket per conversation: fold the policy escalation into
+                # today's open ticket instead of filing a second one.
+                prev = [t for t in (existing.get("trigger") or "").split(",") if t]
+                if "policy_threshold" not in prev:
+                    prev.append("policy_threshold")
+                trigger = ",".join(prev)
+                cust = supabase.table("customers").select("id,name,email,details").eq(
+                    "id", customer_id).execute().data[0]
+                details = cust.get("details") or {}
+                note, priority, csat = _build_ticket_note(
+                    cust, details, trigger, order_id, total, ctx, one_liner)
+                _update_ticket(
+                    existing["ticket_ref"],
+                    trigger=trigger,
+                    priority=priority,
+                    order_id=order_id,
+                    amount=total,
+                    summary=note,
+                    context_extra={**ctx, "one_liner": one_liner, "csat": csat},
+                )
+                try:
+                    details["last_contact_note"] = note
+                    supabase.table("customers").update(
+                        {"details": details}).eq("id", customer_id).execute()
+                except Exception as e:
+                    print(f"[initiate_return] last-contact note failed: {e}",
+                          file=sys.stderr)
+                try:
+                    _stamp_disposition(customer_id, "escalated")
+                except Exception as e:
+                    print(f"[initiate_return] disposition stamp failed: {e}",
+                          file=sys.stderr)
+                ticket_ref = existing["ticket_ref"]
+                deduped = True
+            else:
+                ticket = _create_ticket(
+                    customer_id,
+                    "policy_threshold",
+                    one_liner,
+                    order_id=order_id,
+                    amount=total,
+                    context=ctx,
+                )
+                ticket_ref = ticket["ticket_ref"]
         except Exception as e:
             # Never break the conversation over a ticket write; the escalation
             # itself is still reported to the customer.
             print(f"[initiate_return] ticket write failed: {e}", file=sys.stderr)
         _set_order_status(customer_id, order_id, "awaiting_review")
+        message = (
+            f"Refund of ${total:.2f} meets or exceeds the ${AUTO_APPROVE_LIMIT:.0f} "
+            f"auto-approve limit. Ticket {ticket_ref or '(pending)'} is open. "
+            "The order is ON HOLD as 'awaiting_review' -- it has NOT been canceled and the "
+            "refund has NOT been approved. Tell the customer a human specialist will review "
+            "it and follow up within 1 business day. Do NOT say the order is canceled."
+        )
+        if deduped:
+            message = (
+                f"Ticket {ticket_ref} was already open for this conversation, so this "
+                f"escalation was folded into it instead of filing a second ticket. "
+            ) + message
         return {
             "status": "escalated",
             "order_id": order_id,
             "reason": reason,
             "action": action,
             "ticket_ref": ticket_ref,
-            "message": (
-                f"Refund of ${total:.2f} meets or exceeds the ${AUTO_APPROVE_LIMIT:.0f} "
-                f"auto-approve limit. Ticket {ticket_ref or '(pending)'} is open. "
-                "The order is ON HOLD as 'awaiting_review' -- it has NOT been canceled and the "
-                "refund has NOT been approved. Tell the customer a human specialist will review "
-                "it and follow up within 1 business day. Do NOT say the order is canceled."
-            ),
+            "deduped": deduped,
+            "message": message,
         }
     _set_order_status(customer_id, order_id, action)
     return {
