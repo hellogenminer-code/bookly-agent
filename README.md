@@ -61,10 +61,20 @@ bookly-agent/
 ├── split.html         # Side-by-side demo layout (/split)
 ├── bookstore-bg.png   # Chat page backdrop
 ├── demo-prep.sql      # Escalations table + Kim reset for recording
-├── requirements.txt
+├── requirements.txt   # Python packages to install (pip install -r requirements.txt)
 ├── .env               # your secrets — never committed
 ├── .env.example       # template
-└── easter-egg/        # the Zork easter egg (see below)
+└── easter-egg/          # the Zork easter egg (see below)
+    ├── index_zork.html  # retro terminal game page
+    ├── zork-readme.html # about-the-game page
+    ├── zork.py          # game engine (also runs as a CLI)
+    ├── README_ZORK.md   # the story behind it
+    ├── zork-house.png   # pixel-art backdrop
+    ├── zork-hand.png    # pixel hand cursor
+    ├── zork-valley.png  # readme page backdrop
+    ├── zork-help.png    # "?" button
+    ├── zork-return.png  # "back to game" button
+    └── book-icon.png    # "back to bookstore" button
 ```
 
 ## Setup & run
@@ -133,9 +143,14 @@ python web.py
 4. **Escalation is a structured handoff, not a dead end.** A real ticket — narrative, escalation reason, recommended next step, current CSAT — lands in the work queue, with priority driven by the customer's satisfaction and one ticket per conversation. That's the seam where Zendesk plugs in.
 5. **Every conversation becomes reportable data.** Per-turn topics feed volume reporting: turns and CSAT by topic, escalation rate, disposition — the analytics a CX team actually wants.
 
-## What I'd do differently (production)
+## Production hardening
 
 Server-side session/auth enforcement instead of prompt-driven step-up, RLS tenant isolation, a real ticketing integration (Zendesk/ServiceNow) behind the escalations queue, an eval harness for the topic/CSAT classifier, and PII redaction before any text leaves the trust boundary.
+
+## Future roadmap
+
+- **Voice:** spoken support conversations through a realtime speech API — the same MCP tool boundary, a new modality. Whether the words are typed or spoken, the agent reasons over the same tools and the same database.
+- **Image understanding:** let customers send photos — a damaged spine, the wrong item in the box. A vision model inspects the image, attaches its findings to the escalation ticket, and the return flow starts with evidence instead of twenty questions.
 
 ## The easter egg
 
