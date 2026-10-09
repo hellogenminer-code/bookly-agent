@@ -191,20 +191,18 @@ def _latest_csat(details: dict) -> Optional[int]:
 
 
 def _open_ticket_today_by_email(customer_email: str) -> Optional[dict]:
-    """Most recent open escalation ticket from today, or None."""
-    today = date.today().isoformat()
+    """Most recent open escalation ticket for this customer, or None."""
     resp = (
         supabase.table("escalations")
         .select("ticket_ref,created_at,trigger,priority,status")
         .eq("customer_email", customer_email)
         .eq("status", "open")
         .order("created_at", desc=True)
+        .limit(1)
         .execute()
     )
-    for t in resp.data or []:
-        if (t.get("created_at") or "")[:10] == today:
-            return t
-    return None
+    data = resp.data or []
+    return data[0] if data else None
 
 
 def _update_ticket(ticket_ref: str, priority: Optional[str] = None,
@@ -341,7 +339,7 @@ def _check_eligibility(order_id: str) -> dict:
     if order is None:
         return {"eligible": False, "reason": f"Order {order_id} not found."}
     status = order["status"]
-    if status in ("processing", "shipped"):
+    if status == "processing":
         return {
             "eligible": True,
             "order_id": order_id,
@@ -412,21 +410,39 @@ def _norm_words(text: str) -> list[str]:
     return [w[:-1] if w.endswith("s") and len(w) > 3 else w for w in words]
 
 
+def _word_match(query_word: str, title_word: str) -> bool:
+    if query_word == title_word:
+        return True
+
+    if len(query_word) >= 4 and title_word.startswith(query_word):
+        return True
+
+    return False
+
+
 @mcp.tool()
 def search_catalog(query: str) -> dict:
-    """Search the product catalog by keyword. Matches on whole words (so
-    'journals' finds 'journal') and falls back to substring matching.
+    """Search the product catalog by keyword. Matches normalized words and
+    allows sensible prefix matches such as 'leather' -> 'leatherbound'.
     Returns matches with price and stock levels."""
     q = query.lower().strip()
     qw = _norm_words(q)
     matches = []
+
     for item in CATALOG:
         title = item["title"].lower()
         tw = _norm_words(title)
-        if (qw and all(w in tw for w in qw)) or (q and q in title):
-            matches.append(item)
-    return {"query": query, "results": matches}
 
+        if (
+            qw
+            and all(
+                any(_word_match(qword, tword) for tword in tw)
+                for qword in qw
+            )
+        ) or (q and q in title):
+            matches.append(item)
+
+    return {"query": query, "results": matches}
 
 @mcp.tool()
 def create_order(customer_id: str, skus: list[str]) -> dict:
@@ -470,11 +486,28 @@ def create_order(customer_id: str, skus: list[str]) -> dict:
 
 @mcp.tool()
 def get_order_status(order_id: str) -> dict:
-    """Get the status of an order by its order ID, e.g. 'ORD-1001'."""
+    """Get the current status of an order."""
     customer, order = _find_order(order_id)
+
     if order is None:
         return {"found": False, "order_id": order_id}
-    return {"found": True, "customer_name": customer["name"], "order": order}
+
+    status = order.get("status")
+
+    if status == "processing":
+        customer_status = (
+            "Processing — the order has been received and is still being prepared. "
+            "It has not shipped."
+        )
+    else:
+        customer_status = status
+
+    return {
+        "found": True,
+        "customer_name": customer["name"],
+        "order": order,
+        "customer_status": customer_status,
+    }
 
 
 @mcp.tool()
@@ -488,21 +521,41 @@ def get_policy(topic: str) -> dict:
 
 @mcp.tool()
 def check_return_eligibility(order_id: str) -> dict:
-    """Check whether an order can be returned or cancelled. Delivered orders must be
-    within 30 days; unshipped orders can always be cancelled. Orders $150+ require
-    specialist review -- never tell the customer the return is approved."""
-    result = _check_eligibility(order_id)
-    if result.get("eligible") and result.get("total", 0) >= AUTO_APPROVE_LIMIT:
-        result["review_required"] = True
-        result["note"] = (
-            f"Order total ${result['total']:.2f} meets/exceeds the ${AUTO_APPROVE_LIMIT:.0f} "
-            "auto-approve limit: a return is possible but REQUIRES specialist review. Do NOT "
-            "tell the customer the return is approved or eligible, and do NOT say the order "
-            "is canceled -- collect their reason, then call initiate_return to submit it "
-            "for review."
-        )
-    return result
+    """Check whether a return/cancellation request can proceed.
 
+    Some requests require specialist review. Internal review criteria must never
+    be disclosed to the customer.
+    """
+    result = _check_eligibility(order_id)
+
+    if not result.get("eligible"):
+        return {
+            "can_proceed": False,
+            "order_id": order_id,
+            "customer_message": result.get(
+                "reason",
+                "This order cannot currently be returned."
+            ),
+        }
+
+    if result.get("total", 0) >= AUTO_APPROVE_LIMIT:
+        return {
+            "can_proceed": True,
+            "order_id": order_id,
+            "review_required": True,
+            "needs_reason": True,
+            "customer_message": (
+                "This request requires specialist review. "
+                "Ask the customer for the reason before submitting it."
+            ),
+        }
+
+    return {
+        "can_proceed": True,
+        "order_id": order_id,
+        "review_required": False,
+        "needs_reason": True,
+    }
 
 @mcp.tool()
 def initiate_return(order_id: str, reason: str) -> dict:
@@ -582,26 +635,17 @@ def initiate_return(order_id: str, reason: str) -> dict:
             # itself is still reported to the customer.
             print(f"[initiate_return] ticket write failed: {e}", file=sys.stderr)
         _set_order_status(customer_id, order_id, "awaiting_review")
-        message = (
-            f"Refund of ${total:.2f} meets or exceeds the ${AUTO_APPROVE_LIMIT:.0f} "
-            f"auto-approve limit. Ticket {ticket_ref or '(pending)'} is open. "
-            "The order is ON HOLD as 'awaiting_review' -- it has NOT been canceled and the "
-            "refund has NOT been approved. Tell the customer a human specialist will review "
-            "it and follow up within 1 business day. Do NOT say the order is canceled."
-        )
-        if deduped:
-            message = (
-                f"Ticket {ticket_ref} was already open for this conversation, so this "
-                f"escalation was folded into it instead of filing a second ticket. "
-            ) + message
         return {
-            "status": "escalated",
+            "status": "review_required",
             "order_id": order_id,
-            "reason": reason,
-            "action": action,
             "ticket_ref": ticket_ref,
             "deduped": deduped,
-            "message": message,
+            "order_status": "awaiting_review",
+            "customer_message": (
+                "The request has been submitted for specialist review. "
+                "The order is on hold while it is reviewed. "
+                "A specialist will follow up within 1 business day."
+            ),
         }
     _set_order_status(customer_id, order_id, action)
     return {
